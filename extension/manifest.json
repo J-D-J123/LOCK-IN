@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "LOCK IN – Phone Guard",
+  "description": "Blocks distracting websites when the camera catches you on your phone.",
+  "version": "1.0",
+
+  "permissions": [
+    "tabs",
+    "storage",
+    "declarativeNetRequest",
+    "alarms"
+  ],
+  "host_permissions": ["<all_urls>"],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_title": "LOCK IN – Click to open detector"
+  },
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' https://cdn.jsdelivr.net; object-src 'self'; connect-src 'self' https://storage.googleapis.com https://cdn.jsdelivr.net https://tfhub.dev; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; worker-src blob: 'self'; img-src 'self' data:;"
+  }
+}

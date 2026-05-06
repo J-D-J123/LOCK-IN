@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LOCKED IN</title>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Mono&family=Oswald:wght@300;400;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root { --orange: #FF6B00; --blue: #00CFFF; --gold: #FFD700; }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: 'Oswald', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+      overflow: hidden;
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(255,107,0,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,107,0,0.04) 1px, transparent 1px);
+      background-size: 60px 60px;
+      animation: gridMove 20s linear infinite;
+      pointer-events: none;
+    }
+
+    @keyframes gridMove { from { background-position: 0 0; } to { background-position: 60px 60px; } }
+
+    /* ── MAIN CONTENT ── */
+    .inner { position: relative; z-index: 2; max-width: 700px; }
+
+    .eyebrow {
+      font-family: 'Space Mono', monospace;
+      font-size: .72rem;
+      letter-spacing: .38em;
+      color: rgba(255,107,0,.7);
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+    }
+
+    .headline {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(3.5rem, 12vw, 9rem);
+      text-transform: uppercase;
+      line-height: .88;
+      margin-bottom: 2rem;
+    }
+
+    .headline .orange { color: var(--orange); }
+
+    .quote {
+      font-size: clamp(1rem, 2vw, 1.35rem);
+      font-weight: 300;
+      color: rgba(255,255,255,.65);
+      line-height: 1.8;
+      max-width: 580px;
+      margin: 0 auto 3rem;
+    }
+
+    /* ── TIMER ── */
+    .timer-wrap {
+      border: 1px solid rgba(255,107,0,.25);
+      border-left: 4px solid var(--orange);
+      background: rgba(255,107,0,.05);
+      padding: 2rem 3rem;
+      margin-bottom: 3rem;
+      display: inline-block;
+    }
+
+    .timer-label {
+      font-family: 'Space Mono', monospace;
+      font-size: .68rem;
+      letter-spacing: .35em;
+      color: var(--orange);
+      text-transform: uppercase;
+      margin-bottom: .8rem;
+    }
+
+    .timer-count {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(3rem, 8vw, 5.5rem);
+      letter-spacing: .05em;
+      line-height: 1;
+    }
+
+    .timer-sub {
+      font-size: .8rem;
+      color: rgba(255,255,255,.35);
+      margin-top: .5rem;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    /* ── MOTIVATIONAL QUOTES CYCLE ── */
+    .rotating-quote {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(1.4rem, 3vw, 2.2rem);
+      text-transform: uppercase;
+      color: rgba(255,255,255,.15);
+      margin-bottom: 3rem;
+      min-height: 3rem;
+      transition: opacity .5s ease;
+      letter-spacing: .02em;
+    }
+
+    .rotating-quote.fade { opacity: 0; }
+
+    /* ── UNLOCK ── */
+    .unlock-section { margin-top: 1rem; }
+
+    .unlock-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.1);
+      color: rgba(255,255,255,.2);
+      font-family: 'Space Mono', monospace;
+      font-size: .62rem;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      padding: .7rem 1.5rem;
+      cursor: not-allowed;
+      transition: all .3s;
+    }
+
+    .unlock-btn.ready {
+      cursor: pointer;
+      color: rgba(255,255,255,.4);
+      border-color: rgba(255,255,255,.2);
+    }
+
+    .unlock-btn.ready:hover { color: var(--orange); border-color: var(--orange); }
+
+    .unlock-label {
+      font-size: .6rem;
+      color: rgba(255,255,255,.18);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      margin-top: .8rem;
+    }
+
+    /* ── CONFIRM DIALOG ── */
+    .confirm-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.96);
+      z-index: 100;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 2rem;
+    }
+    .confirm-overlay.active { display: flex; }
+
+    .confirm-title {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(2rem, 6vw, 4rem);
+      text-transform: uppercase;
+      color: var(--orange);
+      margin-bottom: 1.5rem;
+    }
+
+    .confirm-body {
+      font-size: 1.1rem;
+      font-weight: 300;
+      color: rgba(255,255,255,.6);
+      line-height: 1.7;
+      max-width: 500px;
+      margin-bottom: 2.5rem;
+    }
+
+    .confirm-btns { display: flex; gap: 1rem; }
+
+    .btn-cancel {
+      background: transparent;
+      border: 1px solid rgba(255,107,0,.4);
+      color: var(--orange);
+      font-family: 'Anton', sans-serif;
+      font-size: 1.1rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 1rem 2.5rem;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-cancel:hover { background: var(--orange); color: #000; }
+
+    .btn-unlock {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.15);
+      color: rgba(255,255,255,.3);
+      font-family: 'Anton', sans-serif;
+      font-size: 1.1rem;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      padding: 1rem 2.5rem;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-unlock:hover { color: rgba(255,255,255,.6); border-color: rgba(255,255,255,.3); }
+  </style>
+</head>
+<body>
+
+<div class="inner">
+  <div class="eyebrow">Browser Lockdown Active</div>
+
+  <h1 class="headline">
+    You Were<br>
+    <span class="orange">Caught.</span>
+  </h1>
+
+  <p class="quote" id="main-quote">
+    You picked up your phone. That choice has a consequence.<br>
+    Every person who changed their life first had to stop running to distractions.
+  </p>
+
+  <div class="timer-wrap">
+    <div class="timer-label">Lockdown ends in</div>
+    <div class="timer-count" id="timer">–:––</div>
+    <div class="timer-sub">Distracting sites are blocked</div>
+  </div>
+
+  <div class="rotating-quote" id="rotating-quote"></div>
+
+  <div class="unlock-section">
+    <button class="unlock-btn" id="unlock-btn" disabled>
+      Emergency Unlock (<span id="unlock-countdown">30</span>s)
+    </button>
+    <p class="unlock-label">Available after 30 seconds — defeats the purpose</p>
+  </div>
+</div>
+
+<!-- Confirm dialog -->
+<div class="confirm-overlay" id="confirm">
+  <div class="confirm-title">Are you sure?</div>
+  <p class="confirm-body">
+    Unlocking now means you gave up.<br>
+    The version of you that locks in is one decision away.<br>
+    <strong style="color:rgba(255,255,255,.8);">Put the phone down and close this thought.</strong>
+  </p>
+  <div class="confirm-btns">
+    <button class="btn-cancel" id="btn-stay">I'll stay locked in</button>
+    <button class="btn-unlock" id="btn-confirm-unlock">Unlock anyway</button>
+  </div>
+</div>
+
+<script>
+// ── ROTATING QUOTES ──────────────────────────────────────────
+const QUOTES = [
+  '"Every scroll you make is someone else\'s come up."',
+  '"You\'re not tired. You\'re uninspired."',
+  '"The dream doesn\'t die. You do — one excuse at a time."',
+  '"Pain from discipline weighs ounces. Regret weighs tons."',
+  '"While you\'re overthinking, they\'re outworking."',
+  '"You said you would. Prove it."',
+  '"Who you are right now is who you chose to become."',
+  '"Potential without action is just a story you tell yourself."',
+];
+
+let qi = 0;
+const rqEl = document.getElementById('rotating-quote');
+
+function rotateQuote() {
+  rqEl.classList.add('fade');
+  setTimeout(() => {
+    qi = (qi + 1) % QUOTES.length;
+    rqEl.textContent = QUOTES[qi];
+    rqEl.classList.remove('fade');
+  }, 500);
+}
+
+rqEl.textContent = QUOTES[0];
+setInterval(rotateQuote, 5000);
+
+// ── TIMER ────────────────────────────────────────────────────
+const timerEl = document.getElementById('timer');
+
+function updateTimer(endTime) {
+  const remaining = Math.max(0, endTime - Date.now());
+  const m = Math.floor(remaining / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  timerEl.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  if (remaining > 0) {
+    setTimeout(() => updateTimer(endTime), 1000);
+  } else {
+    timerEl.textContent = '0:00';
+    // Lockdown over — tell background to clean up
+    chrome.runtime.sendMessage({ type: 'END_LOCKDOWN' });
+    setTimeout(() => window.history.back(), 1500);
+  }
+}
+
+// Get current lockdown end time from background
+chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (data) => {
+  if (data && data.lockdownActive && data.lockdownEndTime > Date.now()) {
+    updateTimer(data.lockdownEndTime);
+  } else {
+    timerEl.textContent = 'DONE';
+    setTimeout(() => window.history.back(), 2000);
+  }
+});
+
+// ── UNLOCK BUTTON (delayed) ──────────────────────────────────
+const unlockBtn      = document.getElementById('unlock-btn');
+const unlockCountEl  = document.getElementById('unlock-countdown');
+const confirmDiv     = document.getElementById('confirm');
+const btnStay        = document.getElementById('btn-stay');
+const btnConfirmU    = document.getElementById('btn-confirm-unlock');
+
+let unlockSecs = 30;
+const unlockTick = setInterval(() => {
+  unlockSecs--;
+  unlockCountEl.textContent = unlockSecs;
+  if (unlockSecs <= 0) {
+    clearInterval(unlockTick);
+    unlockBtn.disabled = false;
+    unlockBtn.classList.add('ready');
+    unlockBtn.textContent = 'Emergency Unlock';
+  }
+}, 1000);
+
+unlockBtn.addEventListener('click', () => {
+  if (!unlockBtn.disabled) confirmDiv.classList.add('active');
+});
+
+btnStay.addEventListener('click', () => confirmDiv.classList.remove('active'));
+
+btnConfirmU.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'END_LOCKDOWN' }, () => {
+    window.history.back();
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LOCK IN · Phone Guard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Mono&family=Oswald:wght@300;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root { --orange: #FF6B00; --red: #FF2222; --blue: #00CFFF; }
+
+    body {
+      background: #000;
+      color: #fff;
+      font-family: 'Space Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .brand      { font-family: 'Anton', sans-serif; font-size: 2.2rem; letter-spacing: .1em; text-transform: uppercase; color: var(--orange); margin-bottom: .3rem; }
+    .brand-sub  { font-size: .68rem; letter-spacing: .38em; color: rgba(255,255,255,.35); text-transform: uppercase; margin-bottom: 2rem; }
+
+    /* ── CAMERA ── */
+    .cam-wrap {
+      position: relative;
+      width: 480px; height: 360px;
+      border: 1px solid rgba(255,107,0,.3);
+      background: #080808;
+      overflow: hidden;
+    }
+
+    #webcam {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      display: block;
+    }
+
+    #det-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+
+    .scan-line {
+      position: absolute; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(to right, transparent, rgba(255,107,0,.45), transparent);
+      animation: scan 3s linear infinite;
+      pointer-events: none;
+    }
+
+    .cam-wrap::before, .cam-wrap::after {
+      content: ''; position: absolute;
+      width: 22px; height: 22px; z-index: 2; pointer-events: none;
+    }
+    .cam-wrap::before { top: 0; left: 0; border-top: 2px solid var(--orange); border-left: 2px solid var(--orange); }
+    .cam-wrap::after  { bottom: 0; right: 0; border-bottom: 2px solid var(--orange); border-right: 2px solid var(--orange); }
+
+    /* ── STATUS ── */
+    .status-row { display: flex; align-items: center; gap: .8rem; margin-top: 1.4rem; font-size: .7rem; letter-spacing: .22em; text-transform: uppercase; }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #333; flex-shrink: 0; }
+    .dot.loading  { background: #555; }
+    .dot.watching { background: var(--orange); animation: blink 1.8s ease-in-out infinite; }
+    .dot.alert    { background: var(--red);    animation: blink .35s ease-in-out infinite; }
+    .dot.locked   { background: var(--blue);   animation: blink 2s ease-in-out infinite; }
+    .dot.cooldown { background: #555; }
+
+    .slabel           { color: rgba(255,255,255,.4); }
+    .slabel.watching  { color: var(--orange); }
+    .slabel.alert     { color: var(--red); }
+    .slabel.locked    { color: var(--blue); }
+
+    /* ── CONFIDENCE BAR ── */
+    .conf-bar  { width: 480px; height: 3px; background: rgba(255,255,255,.05); margin-top: .5rem; overflow: hidden; }
+    .conf-fill { height: 100%; width: 0%; background: var(--orange); transition: width .12s ease, background .12s ease; }
+
+    /* ── DURATION SELECTOR ── */
+    .duration-row {
+      display: flex; align-items: center; gap: .8rem;
+      margin-top: 1.5rem; font-size: .65rem; letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.35);
+    }
+
+    .dur-btn {
+      background: transparent;
+      border: 1px solid rgba(255,107,0,.25);
+      color: rgba(255,255,255,.45);
+      font-family: 'Space Mono', monospace;
+      font-size: .65rem;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      padding: .4rem .8rem;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .dur-btn:hover, .dur-btn.active { border-color: var(--orange); color: var(--orange); }
+
+    /* ── NOTE ── */
+    .note {
+      margin-top: 1.8rem;
+      font-size: .7rem; color: rgba(255,255,255,.65);
+      letter-spacing: .18em; text-transform: uppercase;
+      text-align: center; max-width: 480px; line-height: 2;
+    }
+
+    /* ── ALERT OVERLAY ── */
+    .alert-overlay {
+      position: fixed; inset: 0; background: #000;
+      z-index: 200; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; padding: 2rem;
+    }
+    .alert-overlay.active { display: flex; animation: flashRed .4s ease; }
+
+    .alert-headline {
+      font-family: 'Anton', sans-serif;
+      font-size: clamp(3rem, 10vw, 7rem);
+      text-transform: uppercase; color: var(--red); line-height: .9;
+      text-shadow: 0 0 80px rgba(255,30,30,.55);
+      animation: shake .5s ease; margin-bottom: 1.5rem;
+    }
+
+    .alert-body {
+      font-family: 'Oswald', sans-serif;
+      font-size: clamp(1rem, 2.5vw, 1.4rem);
+      font-weight: 300; color: rgba(255,255,255,.55);
+      line-height: 1.7; max-width: 520px; margin-bottom: 2.5rem;
+    }
+
+    .alert-count       { font-family: 'Anton', sans-serif; font-size: clamp(5rem, 15vw, 9rem); color: var(--orange); line-height: 1; }
+    .alert-count-label { font-size: .68rem; letter-spacing: .35em; color: rgba(255,255,255,.25); text-transform: uppercase; margin-top: .5rem; }
+
+    .locked-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.96);
+      z-index: 200; display: none;
+      flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 2rem;
+    }
+    .locked-overlay.active { display: flex; }
+
+    .locked-title { font-family: 'Anton', sans-serif; font-size: clamp(2rem, 7vw, 5rem); text-transform: uppercase; color: var(--blue); margin-bottom: 1.2rem; }
+    .locked-timer { font-family: 'Anton', sans-serif; font-size: clamp(3rem, 10vw, 7rem); color: var(--orange); line-height: 1; }
+    .locked-sub   { font-family: 'Oswald', sans-serif; font-size: 1.1rem; font-weight: 300; color: rgba(255,255,255,.5); margin-top: 1rem; max-width: 500px; line-height: 1.6; }
+
+    @keyframes scan     { from { top: 0; opacity:1; } 90% { opacity:1; } to { top:100%; opacity:0; } }
+    @keyframes blink    { 0%,100% { opacity:1; } 50% { opacity:.2; } }
+    @keyframes flashRed { from { background: rgba(200,0,0,.35); } to { background:#000; } }
+    @keyframes shake    { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-10px)} 40%{transform:translateX(10px)} 60%{transform:translateX(-6px)} 80%{transform:translateX(6px)} }
+
+    @media (max-width:520px) { .cam-wrap, .conf-bar { width:95vw; } .cam-wrap { height:72vw; } }
+  </style>
+</head>
+<body>
+
+  <div class="brand">LOCK IN</div>
+  <div class="brand-sub">Phone Guard — Active</div>
+
+  <div class="cam-wrap">
+    <video id="webcam" autoplay muted playsinline></video>
+    <canvas id="det-canvas"></canvas>
+    <div class="scan-line"></div>
+  </div>
+
+  <div class="status-row">
+    <div class="dot loading" id="dot"></div>
+    <span class="slabel" id="slabel">Loading AI model…</span>
+  </div>
+
+  <div class="conf-bar">
+    <div class="conf-fill" id="conf-fill"></div>
+  </div>
+
+  <div class="duration-row">
+    Lockdown duration:
+    <button class="dur-btn" data-min="15">15 min</button>
+    <button class="dur-btn active" data-min="30">30 min</button>
+    <button class="dur-btn" data-min="60">1 hr</button>
+    <button class="dur-btn" data-min="120">2 hr</button>
+  </div>
+
+  <p class="note">
+    Keep this tab open.<br>
+    Camera catches your phone → browser locks down.
+  </p>
+
+  <!-- Phone detected — redirecting overlay -->
+  <div class="alert-overlay" id="alert-overlay">
+    <div class="alert-headline">PUT IT<br>DOWN.</div>
+    <p class="alert-body">
+      You picked up your phone.<br>
+      You know what that means. Lockdown starting.
+    </p>
+    <div class="alert-count" id="alert-count">3</div>
+    <div class="alert-count-label">seconds</div>
+  </div>
+
+  <!-- Already locked overlay -->
+  <div class="locked-overlay" id="locked-overlay">
+    <div class="locked-title">Browser Locked</div>
+    <div class="locked-timer" id="locked-timer">–:–</div>
+    <p class="locked-sub">Distracting sites are blocked. Keep working.<br>Lockdown ends automatically.</p>
+  </div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────
+const FRAMES_NEEDED  = 15;
+const CONF_MIN       = 0.58;
+const COOLDOWN_MS    = 60000; // 1 min cooldown between triggers
+
+// ── STATE ───────────────────────────────────────────────────
+let model       = null;
+let detecting   = false;
+let consecutive = 0;
+let lastTrigger = 0;
+let alertUp     = false;
+let selectedDur = 30; // minutes
+
+// ── DOM ─────────────────────────────────────────────────────
+const video    = document.getElementById('webcam');
+const canvas   = document.getElementById('det-canvas');
+const ctx      = canvas.getContext('2d');
+const dot      = document.getElementById('dot');
+const slabel   = document.getElementById('slabel');
+const confFill = document.getElementById('conf-fill');
+const alertDiv = document.getElementById('alert-overlay');
+const countEl  = document.getElementById('alert-count');
+const lockDiv  = document.getElementById('locked-overlay');
+const lockTime = document.getElementById('locked-timer');
+
+// ── DURATION BUTTONS ────────────────────────────────────────
+document.querySelectorAll('.dur-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.dur-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedDur = parseInt(btn.dataset.min);
+  });
+});
+
+// ── STATUS HELPER ───────────────────────────────────────────
+function setStatus(state, text) {
+  dot.className    = 'dot ' + state;
+  slabel.className = 'slabel ' + state;
+  slabel.textContent = text;
+}
+
+// ── CHECK IF ALREADY LOCKED ──────────────────────────────────
+async function checkExistingLockdown() {
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (data) => {
+      if (chrome.runtime.lastError) { resolve(false); return; }
+      if (data && data.lockdownActive && data.lockdownEndTime > Date.now()) {
+        showLockedState(data.lockdownEndTime);
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+    });
+  });
+}
+
+function showLockedState(endTime) {
+  lockDiv.classList.add('active');
+  setStatus('locked', 'Browser locked');
+  updateLockTimer(endTime);
+}
+
+function updateLockTimer(endTime) {
+  const remaining = Math.max(0, endTime - Date.now());
+  if (remaining <= 0) {
+    lockDiv.classList.remove('active');
+    setStatus('watching', 'Watching…');
+    return;
+  }
+  const m = Math.floor(remaining / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  lockTime.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+  setTimeout(() => updateLockTimer(endTime), 1000);
+}
+
+// ── BOOT ────────────────────────────────────────────────────
+async function boot() {
+  // Check if lockdown already active
+  const alreadyLocked = await checkExistingLockdown();
+  if (alreadyLocked) return;
+
+  setStatus('loading', 'Loading AI model…');
+
+  try {
+    model = await cocoSsd.load({ base: 'mobilenet_v2' });
+  } catch (e) {
+    setStatus('', 'Model failed — refresh page.'); return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
+  } catch {
+    setStatus('', 'Camera denied — allow access and refresh.'); return;
+  }
+
+  canvas.width  = video.videoWidth  || 480;
+  canvas.height = video.videoHeight || 360;
+
+  setStatus('watching', 'Watching…');
+  detecting = true;
+  loop();
+}
+
+// ── DETECTION LOOP ───────────────────────────────────────────
+async function loop() {
+  if (!detecting) return;
+
+  const now      = Date.now();
+  const cooldown = now - lastTrigger < COOLDOWN_MS;
+
+  let preds = [];
+  try { preds = await model.detect(video); } catch (_) {}
+
+  const phones = preds.filter(p => p.class === 'cell phone' && p.score >= CONF_MIN);
+
+  // Draw mirrored bounding boxes
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (phones.length && !cooldown) {
+    phones.forEach(p => {
+      const [x, y, w, h] = p.bbox;
+      const mx = canvas.width - x - w; // mirror X to match CSS-flipped video
+      ctx.strokeStyle = '#FF6B00';
+      ctx.lineWidth   = 2;
+      ctx.strokeRect(mx, y, w, h);
+      ctx.fillStyle = 'rgba(255,107,0,0.12)';
+      ctx.fillRect(mx, y, w, h);
+      ctx.fillStyle = '#FF6B00';
+      ctx.font      = 'bold 11px monospace';
+      ctx.fillText(`PHONE ${Math.round(p.score * 100)}%`, mx + 4, y > 16 ? y - 4 : y + 14);
+    });
+  }
+
+  // Confidence meter
+  const maxConf = phones.length ? Math.max(...phones.map(p => p.score)) : 0;
+  confFill.style.width      = (maxConf * 100).toFixed(1) + '%';
+  confFill.style.background = maxConf > 0.78 ? '#FF2222' : '#FF6B00';
+
+  // State machine
+  if (cooldown && !alertUp) {
+    const s = Math.ceil((COOLDOWN_MS - (now - lastTrigger)) / 1000);
+    setStatus('cooldown', `Cooldown — ${s}s`);
+    consecutive = 0;
+  } else if (phones.length && !alertUp && !cooldown) {
+    consecutive++;
+    const pct = Math.round((consecutive / FRAMES_NEEDED) * 100);
+    setStatus('alert', `Phone detected — locking in ${pct}%`);
+    if (consecutive >= FRAMES_NEEDED) {
+      triggerLockdown();
+      return;
+    }
+  } else if (!alertUp && !cooldown) {
+    if (consecutive > 0) consecutive = Math.max(0, consecutive - 1);
+    setStatus('watching', 'Watching…');
+  }
+
+  requestAnimationFrame(loop);
+}
+
+// ── TRIGGER ──────────────────────────────────────────────────
+function triggerLockdown() {
+  alertUp     = true;
+  lastTrigger = Date.now();
+  alertDiv.classList.add('active');
+  setStatus('alert', 'PHONE DETECTED');
+
+  let count = 3;
+  countEl.textContent = count;
+
+  const tick = setInterval(() => {
+    count--;
+    countEl.textContent = count;
+    if (count <= 0) {
+      clearInterval(tick);
+      // Tell the background to activate lockdown
+      chrome.runtime.sendMessage(
+        { type: 'START_LOCKDOWN', durationMinutes: selectedDur },
+        () => {
+          alertDiv.classList.remove('active');
+          alertUp = false;
+          // Show locked state
+          const endTime = Date.now() + selectedDur * 60 * 1000;
+          showLockedState(endTime);
+          // Resume detection after lockdown ends
+          setTimeout(() => {
+            lockDiv.classList.remove('active');
+            setStatus('watching', 'Watching…');
+            detecting = true;
+            loop();
+          }, selectedDur * 60 * 1000);
+        }
+      );
+    }
+  }, 1000);
+}
+
+boot();
+</script>
+</body>
+</html>
