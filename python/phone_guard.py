@@ -66,9 +66,8 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# DirectShow on Windows: faster opens, no obsensor/FFmpeg noise, exclusive-lock
-# safe.  Other platforms fall back to auto-detect (0).
-_CAM_BACKEND = cv2.CAP_DSHOW if sys.platform == 'win32' else 0
+# Use auto-detect for reliable frame capture; _quiet() suppresses scan noise.
+_CAM_BACKEND = 0
 
 PHONE_CLASS_ID = 67   # COCO: "cell phone"
 LINE = 64             # terminal line width
@@ -687,6 +686,11 @@ def main():
     hotplug = HotPlugMonitor(caps, caps_lock, per_cam_consec)
     hotplug.start()
 
+    # ── Single persistent preview window ─────────────────────
+    WIN = 'LOCK IN \u2014 Phone Guard'
+    if SHOW_WINDOW:
+        cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
+
     # ── Detection state ───────────────────────────────────────
     consecutive  = 0
     countdown_at = None
@@ -835,8 +839,7 @@ def main():
                         gcol = (0, 160, 60)
                     cv2.putText(sbar, gtxt, (12, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, gcol, 2)
-                    cv2.imshow('LOCK IN \u2014 Phone Guard',
-                               np.vstack([grid, sbar]))
+                    cv2.imshow(WIN, np.vstack([grid, sbar]))
 
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord('q'), 27):
