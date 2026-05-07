@@ -9,8 +9,8 @@ Lockdown state persists across restarts via lockdown_state.json.
 # ╔══════════════════════════════════════════════════════════╗
 #  EDIT THESE TO CUSTOMIZE
 # ╚══════════════════════════════════════════════════════════╝
-CONFIDENCE_MIN      = 0.75    # detection confidence threshold (0.0–1.0)
-FRAMES_TO_WARN      = 20      # consecutive frames before countdown starts
+CONFIDENCE_MIN      = 0.62    # detection confidence threshold (0.0–1.0)
+FRAMES_TO_WARN      = 28      # consecutive frames before countdown starts
 COUNTDOWN_SECS      = 4       # seconds to put phone down before lock fires
 SHOW_WINDOW         = True    # False = headless / silent
 
