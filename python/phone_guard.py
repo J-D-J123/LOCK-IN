@@ -465,7 +465,8 @@ class CameraCapture(threading.Thread):
             cap.release()
             self.failed = True
             return
-        fail = 0
+        fail       = 0
+        started_at = time.time()
         while self.running:
             try:
                 ret, frame = cap.read()
@@ -478,11 +479,20 @@ class CameraCapture(threading.Thread):
                 fail = 0
             else:
                 fail += 1
-                if fail > 30:
-                    self.ok     = False
-                    self.failed = True
-                    break
-                time.sleep(0.03)     # don't busy-spin on a dead camera
+                if not self.ok:
+                    # Haven't got a single frame yet — be patient up to 10 s
+                    # (laptop webcams, IR cameras, etc. can take several seconds)
+                    if time.time() - started_at > 10.0:
+                        self.failed = True
+                        break
+                else:
+                    # Camera was live; allow 90 consecutive misses (~4.5 s)
+                    # before declaring it disconnected
+                    if fail > 90:
+                        self.ok     = False
+                        self.failed = True
+                        break
+                time.sleep(0.05)
         cap.release()
 
     def get_frame(self):
@@ -662,6 +672,9 @@ def main():
     print(f'[+] Model ready: {MODEL}\n')
 
     # ── Start capture threads ─────────────────────────────────
+    # Small pause so cameras are fully released after the dedup scan before
+    # CameraCapture threads reopen them (especially important on Windows).
+    time.sleep(1.5)
     caps_lock      = threading.Lock()
     per_cam_consec = {}
     caps           = [CameraCapture(i) for i in indices]
