@@ -543,9 +543,15 @@ class HotPlugMonitor(threading.Thread):
                 continue
             with _quiet():
                 cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-                opened = cap.isOpened()
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                ret, frame = cap.read()
                 cap.release()
-            if not opened:
+            # Device must produce a bright frame — if it opens but can't,
+            # add it to fake_indices so we never probe it again.
+            if not (ret and frame is not None and frame.mean() > 5.0):
+                self.fake_indices.add(i)
                 continue
             print(f'\n[+] New camera {i} detected — connecting...')
             cc = CameraCapture(i)
