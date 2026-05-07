@@ -393,8 +393,10 @@ def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
         with _quiet():
             cap = cv2.VideoCapture(i, _SCAN_BACKEND)
             if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
+                ret, frame = cap.read()
+                # Require a non-trivial frame: IR/depth cameras produce
+                # all-black frames (mean ≈ 0) and must be excluded.
+                if ret and frame is not None and frame.mean() > 5.0:
                     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     cap.release()
@@ -513,6 +515,7 @@ class HotPlugMonitor(threading.Thread):
             with self.lock:
                 self.caps.append(cc)
                 self.per_cam_consec[i] = 0
+            known.add(i)   # keep probe loop below from re-detecting this camera
             print(f'[+] Camera {i} is live.')
 
         for i in failed:
@@ -531,8 +534,8 @@ class HotPlugMonitor(threading.Thread):
                 cap = cv2.VideoCapture(i, _SCAN_BACKEND)
                 real = False
                 if cap.isOpened():
-                    ret, _ = cap.read()
-                    real = ret
+                    ret, frame = cap.read()
+                    real = ret and frame is not None and frame.mean() > 5.0
                 cap.release()
             if not real:
                 continue
