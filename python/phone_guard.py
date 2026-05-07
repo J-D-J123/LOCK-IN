@@ -66,11 +66,11 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Two backends:
-#   _SCAN_BACKEND  — DirectShow: instant fail on missing indices, no obsensor noise.
-#   _CAP_BACKEND   — auto (MSMF on Windows): reliable frame delivery for real cameras.
+# Both scan and capture use DirectShow on Windows so camera indices are
+# consistent between the scan and the capture threads.  The 10 s patience
+# in CameraCapture.run() handles the slower DSHOW warm-up.
 _SCAN_BACKEND = cv2.CAP_DSHOW if sys.platform == 'win32' else 0
-_CAP_BACKEND  = 0
+_CAP_BACKEND  = cv2.CAP_DSHOW if sys.platform == 'win32' else 0
 
 PHONE_CLASS_ID = 67   # COCO: "cell phone"
 LINE = 64             # terminal line width
