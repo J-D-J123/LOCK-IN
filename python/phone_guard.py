@@ -407,10 +407,10 @@ class CameraCapture(threading.Thread):
         self.failed  = False  # True once the camera permanently dies/unplugs
 
     def run(self):
-        with _quiet():
-            cap = cv2.VideoCapture(self.index, _CAM_BACKEND)
-            opened = cap.isOpened()
-        if not opened:
+        # Open without _quiet(): that helper redirects fd 2 process-wide and
+        # is not safe to call from multiple threads simultaneously.
+        cap = cv2.VideoCapture(self.index, _CAM_BACKEND)
+        if not cap.isOpened():
             cap.release()
             self.failed = True
             return
@@ -451,15 +451,20 @@ class HotPlugMonitor(threading.Thread):
     Runs in the background every `interval` seconds.
     - Adds newly plugged-in cameras to the shared `caps` list instantly.
     - Removes cameras that have permanently failed (unplugged).
+
+    _pending: index → CameraCapture that is still warming up.
+    Keeping at most one CameraCapture per index prevents duplicate threads
+    from racing over the same DirectShow device when reconnection is slow.
     """
     def __init__(self, caps: list, lock: threading.Lock,
                  per_cam_consec: dict, interval: float = HOTPLUG_INTERVAL):
         super().__init__(daemon=True)
-        self.caps           = caps           # shared, mutable list
+        self.caps           = caps
         self.lock           = lock
-        self.per_cam_consec = per_cam_consec  # shared dict — updated in-place
+        self.per_cam_consec = per_cam_consec
         self.interval       = interval
         self.running        = True
+        self._pending: dict[int, CameraCapture] = {}
 
     def run(self):
         while self.running:
@@ -478,36 +483,50 @@ class HotPlugMonitor(threading.Thread):
     def _add_new(self):
         with self.lock:
             known = {c.index for c in self.caps}
+
+        # ── Promote / retire pending connections ──────────────
+        ready  = [i for i, cc in self._pending.items() if cc.ok]
+        failed = [i for i, cc in self._pending.items() if cc.failed]
+
+        for i in ready:
+            cc = self._pending.pop(i)
+            with self.lock:
+                self.caps.append(cc)
+                self.per_cam_consec[i] = 0
+            print(f'[+] Camera {i} is live.')
+
+        for i in failed:
+            # Permanently failed while warming up; drop it so the probe
+            # below will retry on the next cycle.
+            self._pending.pop(i).stop()
+
+        # ── Probe for genuinely new cameras ───────────────────
         for i in range(MAX_SCAN):
-            if i in known:
+            if i in known or i in self._pending:
                 continue
             with _quiet():
                 cap = cv2.VideoCapture(i, _CAM_BACKEND)
                 opened = cap.isOpened()
                 if opened:
                     ret, _ = cap.read()
-                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if ret:
+                        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 cap.release()
             if not (opened and ret):
                 continue
+            # Give DirectShow a moment to fully release the probe handle
+            # before CameraCapture opens the same device.
+            time.sleep(0.4)
             print(f'\n[+] New camera {i} ({w}×{h}) plugged in — connecting...')
             cc = CameraCapture(i)
             cc.start()
-            deadline = time.time() + 4.0
-            while time.time() < deadline and not cc.ok and not cc.failed:
-                time.sleep(0.1)
-            if cc.ok:
-                with self.lock:
-                    self.caps.append(cc)
-                    self.per_cam_consec[i] = 0
-                print(f'[+] Camera {i} is live.')
-            else:
-                cc.stop()
-                print(f'[!] Camera {i} opened but gave no frames — skipped.')
+            self._pending[i] = cc   # will be promoted to live on a future cycle
 
     def stop(self):
         self.running = False
+        for cc in self._pending.values():
+            cc.stop()
 
 
 def build_grid(panels: list, target_w: int = 960) -> np.ndarray | None:
