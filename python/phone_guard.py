@@ -393,7 +393,55 @@ def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
                     print(f'    [+] Camera {i}  ({w}×{h})')
                     continue
             cap.release()
-    return found
+    return deduplicate_cameras(found)
+
+
+def deduplicate_cameras(indices: list[int]) -> list[int]:
+    """
+    Remove indices that map to the same physical camera.
+
+    Windows/DirectShow frequently enumerates one webcam at several indices
+    (e.g. 0 and 1 both return the identical feed).  We detect this by
+    capturing a thumbnail from each index and comparing them pairwise:
+    near-zero MSE → same device → keep only the lower index.
+    """
+    if len(indices) <= 1:
+        return indices
+
+    print('[*] Checking for duplicate camera feeds ...')
+    samples: dict[int, np.ndarray] = {}
+    for i in indices:
+        with _quiet():
+            cap = cv2.VideoCapture(i, _CAM_BACKEND)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            frame = None
+            for _ in range(5):          # skip first frames (auto-exposure settling)
+                ret, f = cap.read()
+                if ret:
+                    frame = f
+            cap.release()
+        if frame is not None:
+            gray = cv2.cvtColor(cv2.resize(frame, (64, 48)), cv2.COLOR_BGR2GRAY)
+            samples[i] = gray.astype(np.float32)
+
+    keep: list[int] = []
+    dropped: set[int] = set()
+    for i in sorted(samples):
+        if i in dropped:
+            continue
+        keep.append(i)
+        for j in sorted(samples):
+            if j <= i or j in dropped:
+                continue
+            mse = float(np.mean((samples[i] - samples[j]) ** 2))
+            if mse < 8.0:               # effectively identical → same physical camera
+                print(f'    [i] Camera {j} is a duplicate of camera {i} '
+                      f'(MSE={mse:.1f}) — skipped.')
+                dropped.add(j)
+
+    return keep
 
 
 class CameraCapture(threading.Thread):
