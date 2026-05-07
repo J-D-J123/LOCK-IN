@@ -46,6 +46,12 @@ import tkinter as tk
 _ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
 STATE_FILE = os.path.join(_ROOT, 'python', 'lockdown_state.json')
 
+# Hide the console window on Windows so only the camera window is visible
+if sys.platform == 'win32':
+    _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+    if _hwnd:
+        ctypes.windll.user32.ShowWindow(_hwnd, 0)  # SW_HIDE
+
 # ── AUTO-INSTALL DEPENDENCIES ────────────────────────────────
 def _ensure():
     missing = []
@@ -696,7 +702,7 @@ def main():
     hotplug.start()
 
     # ── Single persistent preview window ─────────────────────
-    WIN = 'LOCK IN \u2014 Phone Guard'
+    WIN = 'LOCK-IN'
     if SHOW_WINDOW:
         cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
 
