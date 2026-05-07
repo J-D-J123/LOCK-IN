@@ -27,6 +27,7 @@ MAX_SCAN         = 8
 HOTPLUG_INTERVAL = 6.0   # seconds between hot-plug scans for new cameras
 
 MODEL           = 'yolov8n.pt'   # yolov8n = fastest  |  yolov8s = more accurate
+INFER_SIZE      = 320            # inference resolution — lower = faster (try 320 or 416)
 # ════════════════════════════════════════════════════════════
 
 import sys
@@ -654,25 +655,30 @@ def main():
             with caps_lock:
                 active_caps = list(caps)
 
-            for cap in active_caps:
-                frame = cap.get_frame()
-                if frame is None:
-                    continue
+            # ── Batch inference — one forward pass for all cameras ────
+            frame_data = [(cap, cap.get_frame()) for cap in active_caps]
+            frame_data = [(cap, f) for cap, f in frame_data if f is not None]
 
-                results = model(frame, verbose=False, classes=[PHONE_CLASS_ID])
+            if frame_data:
+                batch_results = model(
+                    [f for _, f in frame_data],
+                    verbose=False, classes=[PHONE_CLASS_ID], imgsz=INFER_SIZE,
+                )
+            else:
+                batch_results = []
 
+            for (cap, frame), result in zip(frame_data, batch_results):
                 phone_here = False
                 cam_conf   = 0.0
                 boxes      = []
 
-                for r in results:
-                    for box in r.boxes:
-                        conf = float(box.conf[0])
-                        if int(box.cls[0]) == PHONE_CLASS_ID and conf >= CONFIDENCE_MIN:
-                            phone_here = True
-                            cam_conf   = max(cam_conf, conf)
-                            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                            boxes.append((x1, y1, x2, y2, conf))
+                for box in result.boxes:
+                    conf = float(box.conf[0])
+                    if int(box.cls[0]) == PHONE_CLASS_ID and conf >= CONFIDENCE_MIN:
+                        phone_here = True
+                        cam_conf   = max(cam_conf, conf)
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                        boxes.append((x1, y1, x2, y2, conf))
 
                 if phone_here:
                     per_cam_consec[cap.index] = per_cam_consec.get(cap.index, 0) + 1
