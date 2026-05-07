@@ -1,30 +1,22 @@
 # LOCK IN
 
-A three-part accountability system that watches your camera, catches you picking up your phone, and punishes you for it harder every single time.
+> *Your phone is the enemy. This is the weapon.*
 
-Contributions are welcome. If you have ideas for new features, better detection, or platform support beyond Windows, feel free to open a pull request or start a conversation in the issues tab.
+Most productivity tools ask nicely. LOCK IN does not ask. It watches your camera with a YOLOv8 AI model, and the moment it catches your phone in frame, the clock starts. Put it down in time and you are free. Hold it too long and your entire screen gets locked behind a fullscreen wall you cannot close, skip, or alt-F4 out of. Every single offence doubles the next lockdown. There is no reset button you can reach in time.
 
-## Screenshots
+This is not an app that helps you be more mindful. It is a system that punishes you until the habit breaks.
 
-### Motivational Website
-![Motivational website with Three.js galaxy and brutal quotes](screenshots/1-website.png)
+Three components work together: a Python script that watches your webcam around the clock, a Chrome extension that kills distracting sites the instant a phone is spotted, and a motivational website that reminds you exactly what is at stake. Use one. Use all three. Either way, the phone goes down.
 
-### Python Phone Guard
-![Phone guard camera view catching a phone with YOLOv8](screenshots/2-phone-guard.png)
-
-### Lockdown Overlay
-![Fullscreen lockdown overlay blocking the entire computer](screenshots/3-lockdown.png)
-
-### Chrome Extension
-![Extension blocked page shown when visiting a distracting site](screenshots/4-extension-blocked.png)
+Contributions are welcome. If you want to improve detection accuracy, add new platforms, or build something on top of this, open an issue or send a pull request.
 
 ## What It Does
 
 | Component | Description |
 |---|---|
-| **Motivational Website** | A fullscreen Three.js site with brutal quotes, a live seconds wasted counter, and a visual reminder of where comfort leads |
-| **Python Phone Guard** | Runs your webcam through YOLOv8 AI. Detects your phone. Throws up a fullscreen lockdown overlay that blocks your entire screen. Every offence doubles the next lockdown. |
+| **Python Phone Guard** | Runs your webcam through YOLOv8 AI. Detects your phone across multiple cameras simultaneously. Throws up a fullscreen lockdown overlay that blocks your entire screen. Every offence doubles the next lockdown. |
 | **Chrome Extension** | Browser native phone detection using TensorFlow.js. Blocks YouTube, Instagram, Reddit, TikTok, Netflix and more the moment a phone is spotted. |
+| **Motivational Website** | A fullscreen Three.js site with brutal quotes and a live seconds wasted counter. Open it and leave it running. |
 
 ## Folder Structure
 
@@ -52,10 +44,6 @@ LOCK-IN/
 ```
 
 ## Setup
-
-### Motivational Website
-
-No setup needed. Open `web/index.html` in any browser.
 
 ### Python Phone Guard
 
@@ -90,7 +78,7 @@ double-click  python/run.bat
 
 To reset your offence count, delete `python/lockdown_state.json`.
 
-**Key settings** (top of `phone_guard.py`):**
+**Key settings** (top of `phone_guard.py`):
 ```python
 CONFIDENCE_MIN      = 0.62    # how sure the AI must be (lower = more sensitive)
 FRAMES_TO_WARN      = 28      # consecutive frames before countdown starts
@@ -119,6 +107,10 @@ MODEL               = 'yolov8n.pt'  # swap to yolov8s.pt for better accuracy
 **Blocked sites during lockdown:**
 YouTube, Instagram, X/Twitter, TikTok, Reddit, Facebook, Netflix, Twitch, Snapchat, Pinterest
 
+### Motivational Website
+
+No setup needed. Open `web/index.html` in any browser.
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -139,7 +131,7 @@ YouTube, Instagram, X/Twitter, TikTok, Reddit, Facebook, Netflix, Twitch, Snapch
 | You want always on background detection | **Python script** — runs silently with `SHOW_WINDOW = False` |
 | You only want to block distracting websites | **Chrome Extension** |
 | You do not want to install Python | **Browser detector** (`web/detector.html`) |
-| Multiple monitors or cameras | **Python script** — detects across all cameras simultaneously with hot plug support |
+| Multiple cameras | **Python script** — detects across all cameras simultaneously with hot plug support |
 
 ## Tips
 
@@ -150,6 +142,6 @@ YouTube, Instagram, X/Twitter, TikTok, Reddit, Facebook, Netflix, Twitch, Snapch
 
 ## Contributing
 
-All contributions are welcome whether that is fixing a bug, improving detection accuracy, adding macOS or Linux support, or anything else you think would make this better. Open an issue to discuss ideas or submit a pull request directly.
+All contributions are welcome whether that is fixing a bug, improving detection accuracy, adding macOS or Linux support, or anything else that makes this more ruthless. Open an issue to discuss ideas or submit a pull request directly. The goal is simple: make it impossible to slack off.
 
 *Stop watching. Start doing. The clock does not wait for anyone.*
