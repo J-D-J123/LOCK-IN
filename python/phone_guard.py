@@ -379,71 +379,24 @@ def trigger_lockdown(state: dict):
 # ══════════════════════════════════════════════════════════════
 
 def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
-    """Scan indices 0..(max_index-1) with the DirectShow backend (fast, quiet)."""
+    """
+    Return indices where a camera device responds.
+
+    Uses isOpened() only — no cap.read() — so we never consume a camera
+    handle before CameraCapture opens it.  DSHOW fails instantly on empty
+    indices, keeping the scan fast without obsensor/FFmpeg noise.
+    """
     print(f'[*] Scanning camera indices 0–{max_index - 1} ...')
     found = []
     for i in range(max_index):
         with _quiet():
             cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    found.append(i)
-                    cap.release()
-                    print(f'    [+] Camera {i}  ({w}×{h})')
-                    continue
+            opened = cap.isOpened()
             cap.release()
-    return deduplicate_cameras(found)
-
-
-def deduplicate_cameras(indices: list[int]) -> list[int]:
-    """
-    Remove indices that map to the same physical camera.
-
-    Windows/DirectShow frequently enumerates one webcam at several indices
-    (e.g. 0 and 1 both return the identical feed).  We detect this by
-    capturing a thumbnail from each index and comparing them pairwise:
-    near-zero MSE → same device → keep only the lower index.
-    """
-    if len(indices) <= 1:
-        return indices
-
-    print('[*] Checking for duplicate camera feeds ...')
-    samples: dict[int, np.ndarray] = {}
-    for i in indices:
-        with _quiet():
-            cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-            if not cap.isOpened():
-                cap.release()
-                continue
-            frame = None
-            for _ in range(5):          # skip first frames (auto-exposure settling)
-                ret, f = cap.read()
-                if ret:
-                    frame = f
-            cap.release()
-        if frame is not None:
-            gray = cv2.cvtColor(cv2.resize(frame, (64, 48)), cv2.COLOR_BGR2GRAY)
-            samples[i] = gray.astype(np.float32)
-
-    keep: list[int] = []
-    dropped: set[int] = set()
-    for i in sorted(samples):
-        if i in dropped:
-            continue
-        keep.append(i)
-        for j in sorted(samples):
-            if j <= i or j in dropped:
-                continue
-            mse = float(np.mean((samples[i] - samples[j]) ** 2))
-            if mse < 8.0:               # effectively identical → same physical camera
-                print(f'    [i] Camera {j} is a duplicate of camera {i} '
-                      f'(MSE={mse:.1f}) — skipped.')
-                dropped.add(j)
-
-    return keep
+        if opened:
+            found.append(i)
+            print(f'    [+] Camera {i}  (device present)')
+    return found
 
 
 class CameraCapture(threading.Thread):
@@ -562,27 +515,21 @@ class HotPlugMonitor(threading.Thread):
             self._pending.pop(i).stop()
 
         # ── Probe for genuinely new cameras ───────────────────
+        # isOpened() only — no read — so we don't consume the device handle
+        # before CameraCapture opens it for sustained capture.
         for i in range(MAX_SCAN):
             if i in known or i in self._pending:
                 continue
             with _quiet():
                 cap = cv2.VideoCapture(i, _SCAN_BACKEND)
                 opened = cap.isOpened()
-                if opened:
-                    ret, _ = cap.read()
-                    if ret:
-                        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 cap.release()
-            if not (opened and ret):
+            if not opened:
                 continue
-            # Give DirectShow a moment to fully release the probe handle
-            # before CameraCapture opens the same device.
-            time.sleep(0.4)
-            print(f'\n[+] New camera {i} ({w}×{h}) plugged in — connecting...')
+            print(f'\n[+] New camera {i} detected — connecting...')
             cc = CameraCapture(i)
             cc.start()
-            self._pending[i] = cc   # will be promoted to live on a future cycle
+            self._pending[i] = cc   # promoted to live once cc.ok is True
 
     def stop(self):
         self.running = False
@@ -672,18 +619,16 @@ def main():
     print(f'[+] Model ready: {MODEL}\n')
 
     # ── Start capture threads ─────────────────────────────────
-    # Small pause so cameras are fully released after the dedup scan before
-    # CameraCapture threads reopen them (especially important on Windows).
-    time.sleep(1.5)
     caps_lock      = threading.Lock()
     per_cam_consec = {}
     caps           = [CameraCapture(i) for i in indices]
     for c in caps:
         c.start()
 
-    # Wait up to 10 s; exit early once every thread is either live or failed.
+    # Wait up to 12 s; CameraCapture.run() itself has 10 s patience so this
+    # gives every thread time to either deliver a frame or self-declare failed.
     print('[*] Warming up cameras ...')
-    deadline = time.time() + 10.0
+    deadline = time.time() + 12.0
     while time.time() < deadline:
         if all(c.ok or c.failed for c in caps):
             break
@@ -694,6 +639,11 @@ def main():
         print('[!] No cameras produced frames. Exiting.')
         sys.exit(1)
 
+    for c in caps:
+        frame = c.get_frame()
+        if frame is not None:
+            h, w = frame.shape[:2]
+            print(f'    [+] Camera {c.index}  ({w}×{h})')
     per_cam_consec.update({c.index: 0 for c in caps})
     print(f'[+] {len(caps)} camera(s) active.\n')
     print('  Watching... Ctrl+C or Q to stop.\n')
