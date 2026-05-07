@@ -22,8 +22,9 @@ MAX_LOCKDOWN_SECS   = 7200    # never longer than 2 hours (7200 s)
 # Cameras to watch
 #   'auto'     → scan and use every camera found (recommended)
 #   [0, 1, 2]  → only these specific indices
-CAMERA_INDICES  = 'auto'
-MAX_SCAN        = 8
+CAMERA_INDICES   = 'auto'
+MAX_SCAN         = 8
+HOTPLUG_INTERVAL = 6.0   # seconds between hot-plug scans for new cameras
 
 MODEL           = 'yolov8n.pt'   # yolov8n = fastest  |  yolov8s = more accurate
 # ════════════════════════════════════════════════════════════
@@ -37,6 +38,7 @@ import ctypes.wintypes
 import threading
 import math
 import subprocess
+import contextlib
 import tkinter as tk
 
 # Paths resolved after imports so os is available
@@ -63,8 +65,29 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+# DirectShow on Windows: faster opens, no obsensor/FFmpeg noise, exclusive-lock
+# safe.  Other platforms fall back to auto-detect (0).
+_CAM_BACKEND = cv2.CAP_DSHOW if sys.platform == 'win32' else 0
+
 PHONE_CLASS_ID = 67   # COCO: "cell phone"
 LINE = 64             # terminal line width
+
+
+@contextlib.contextmanager
+def _quiet():
+    """Redirect C-level stderr to devnull during camera probing."""
+    if sys.platform != 'win32':
+        yield
+        return
+    old = os.dup(2)
+    nul = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(nul, 2)
+    os.close(nul)
+    try:
+        yield
+    finally:
+        os.dup2(old, 2)
+        os.close(old)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -353,18 +376,22 @@ def trigger_lockdown(state: dict):
 # ══════════════════════════════════════════════════════════════
 
 def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
+    """Scan indices 0..(max_index-1) with the DirectShow backend (fast, quiet)."""
     print(f'[*] Scanning camera indices 0–{max_index - 1} ...')
     found = []
     for i in range(max_index):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            ret, _ = cap.read()
-            if ret:
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                print(f'    [+] Camera {i}  ({w}×{h})')
-                found.append(i)
-        cap.release()
+        with _quiet():
+            cap = cv2.VideoCapture(i, _CAM_BACKEND)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    found.append(i)
+                    cap.release()
+                    print(f'    [+] Camera {i}  ({w}×{h})')
+                    continue
+            cap.release()
     return found
 
 
@@ -377,10 +404,15 @@ class CameraCapture(threading.Thread):
         self._lock   = threading.Lock()
         self.running = True
         self.ok      = False
+        self.failed  = False  # True once the camera permanently dies/unplugs
 
     def run(self):
-        cap = cv2.VideoCapture(self.index)
-        if not cap.isOpened():
+        with _quiet():
+            cap = cv2.VideoCapture(self.index, _CAM_BACKEND)
+            opened = cap.isOpened()
+        if not opened:
+            cap.release()
+            self.failed = True
             return
         fail = 0
         while self.running:
@@ -395,14 +427,84 @@ class CameraCapture(threading.Thread):
                 fail = 0
             else:
                 fail += 1
-                if fail > 15:
-                    self.ok = False   # signal thread is unhealthy
+                if fail > 30:
+                    self.ok     = False
+                    self.failed = True
+                    break
                 time.sleep(0.03)     # don't busy-spin on a dead camera
         cap.release()
 
     def get_frame(self):
         with self._lock:
             return self._frame.copy() if self._frame is not None else None
+
+    def stop(self):
+        self.running = False
+
+
+# ══════════════════════════════════════════════════════════════
+#  HOT-PLUG MONITOR
+# ══════════════════════════════════════════════════════════════
+
+class HotPlugMonitor(threading.Thread):
+    """
+    Runs in the background every `interval` seconds.
+    - Adds newly plugged-in cameras to the shared `caps` list instantly.
+    - Removes cameras that have permanently failed (unplugged).
+    """
+    def __init__(self, caps: list, lock: threading.Lock,
+                 per_cam_consec: dict, interval: float = HOTPLUG_INTERVAL):
+        super().__init__(daemon=True)
+        self.caps           = caps           # shared, mutable list
+        self.lock           = lock
+        self.per_cam_consec = per_cam_consec  # shared dict — updated in-place
+        self.interval       = interval
+        self.running        = True
+
+    def run(self):
+        while self.running:
+            time.sleep(self.interval)
+            self._prune_dead()
+            self._add_new()
+
+    def _prune_dead(self):
+        with self.lock:
+            dead = [c for c in self.caps if c.failed]
+            for c in dead:
+                self.caps.remove(c)
+                self.per_cam_consec.pop(c.index, None)
+                print(f'\n[!] Camera {c.index} disconnected — removed.')
+
+    def _add_new(self):
+        with self.lock:
+            known = {c.index for c in self.caps}
+        for i in range(MAX_SCAN):
+            if i in known:
+                continue
+            with _quiet():
+                cap = cv2.VideoCapture(i, _CAM_BACKEND)
+                opened = cap.isOpened()
+                if opened:
+                    ret, _ = cap.read()
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cap.release()
+            if not (opened and ret):
+                continue
+            print(f'\n[+] New camera {i} ({w}×{h}) plugged in — connecting...')
+            cc = CameraCapture(i)
+            cc.start()
+            deadline = time.time() + 4.0
+            while time.time() < deadline and not cc.ok and not cc.failed:
+                time.sleep(0.1)
+            if cc.ok:
+                with self.lock:
+                    self.caps.append(cc)
+                    self.per_cam_consec[i] = 0
+                print(f'[+] Camera {i} is live.')
+            else:
+                cc.stop()
+                print(f'[!] Camera {i} opened but gave no frames — skipped.')
 
     def stop(self):
         self.running = False
@@ -490,24 +592,37 @@ def main():
     print(f'[+] Model ready: {MODEL}\n')
 
     # ── Start capture threads ─────────────────────────────────
-    caps = [CameraCapture(i) for i in indices]
+    caps_lock      = threading.Lock()
+    per_cam_consec = {}
+    caps           = [CameraCapture(i) for i in indices]
     for c in caps:
         c.start()
+
+    # Wait up to 10 s; exit early once every thread is either live or failed.
     print('[*] Warming up cameras ...')
-    time.sleep(1.2)
-    caps = [c for c in caps if c.ok]
+    deadline = time.time() + 10.0
+    while time.time() < deadline:
+        if all(c.ok or c.failed for c in caps):
+            break
+        time.sleep(0.2)
+
+    caps[:] = [c for c in caps if c.ok]
     if not caps:
         print('[!] No cameras produced frames. Exiting.')
         sys.exit(1)
 
+    per_cam_consec.update({c.index: 0 for c in caps})
     print(f'[+] {len(caps)} camera(s) active.\n')
     print('  Watching... Ctrl+C or Q to stop.\n')
 
+    # ── Hot-plug monitor ──────────────────────────────────────
+    hotplug = HotPlugMonitor(caps, caps_lock, per_cam_consec)
+    hotplug.start()
+
     # ── Detection state ───────────────────────────────────────
-    consecutive    = 0
-    per_cam_consec = {c.index: 0 for c in caps}
-    countdown_at   = None
-    BAR            = 18
+    consecutive  = 0
+    countdown_at = None
+    BAR          = 18
 
     try:
         while True:
@@ -516,7 +631,11 @@ def main():
             best_conf = 0.0
             panels    = []
 
-            for cap in caps:
+            # Snapshot the list so the hot-plug thread can mutate it freely.
+            with caps_lock:
+                active_caps = list(caps)
+
+            for cap in active_caps:
                 frame = cap.get_frame()
                 if frame is None:
                     continue
@@ -576,19 +695,21 @@ def main():
                 if not any_phone:
                     countdown_at = None
                     consecutive  = 0
-                    print(f'\n\n  [✓] Phone down — lock cancelled. Stay focused.\n')
+                    print(f'\n\n  [\u2713] Phone down \u2014 lock cancelled. Stay focused.\n')
                     try: ctypes.windll.kernel32.Beep(880, 180)
                     except Exception: pass
 
                 elif remaining <= 0:
                     trigger_lockdown(state)     # blocking — screen is locked until done
-                    countdown_at   = None
-                    consecutive    = 0
-                    per_cam_consec = {c.index: 0 for c in caps}
+                    countdown_at = None
+                    consecutive  = 0
+                    with caps_lock:
+                        per_cam_consec.clear()
+                        per_cam_consec.update({c.index: 0 for c in caps})
 
                 else:
                     filled = int((elapsed / COUNTDOWN_SECS) * BAR)
-                    bar    = ('█' * filled).ljust(BAR, '░')
+                    bar    = ('\u2588' * filled).ljust(BAR, '\u2591')
                     status(f'!!! PUT IT DOWN  [{bar}]  {remaining:.1f}s  !!!')
                     try: ctypes.windll.kernel32.Beep(900, 80)
                     except Exception: pass
@@ -596,7 +717,7 @@ def main():
             elif consecutive >= FRAMES_TO_WARN:
                 countdown_at = time.time()
                 n_next = state['offense_count'] + 1
-                print(f'\n\n  [!] Phone confirmed — {COUNTDOWN_SECS}s to put it down!'
+                print(f'\n\n  [!] Phone confirmed \u2014 {COUNTDOWN_SECS}s to put it down!'
                       f'  (would be lockdown #{n_next}: '
                       f'{fmt_duration(offense_duration(n_next))})\n')
                 try: ctypes.windll.kernel32.Beep(1000, 280)
@@ -604,14 +725,16 @@ def main():
 
             elif any_phone:
                 filled  = int((consecutive / FRAMES_TO_WARN) * BAR)
-                bar     = ('█' * filled).ljust(BAR, '░')
+                bar     = ('\u2588' * filled).ljust(BAR, '\u2591')
                 n_next  = state['offense_count'] + 1
                 status(f'PHONE  [{bar}]  {consecutive}/{FRAMES_TO_WARN}'
-                       f'  ({best_conf:.0%})  → lockdown #{n_next}'
+                       f'  ({best_conf:.0%})  \u2192 lockdown #{n_next}'
                        f' = {fmt_duration(offense_duration(n_next))}')
             else:
+                with caps_lock:
+                    ncams = len(caps)
                 n_next = state['offense_count'] + 1
-                status(f'Watching {len(caps)} cam(s) ...  '
+                status(f'Watching {ncams} cam(s) ...  '
                        f'next lockdown #{n_next} = {fmt_duration(offense_duration(n_next))}')
 
             # ── Render grid ───────────────────────────────────
@@ -624,20 +747,22 @@ def main():
                     if countdown_at is not None:
                         elapsed   = now - countdown_at
                         remaining = max(0, COUNTDOWN_SECS - elapsed)
-                        gtxt = f'!!! LOCKING IN {remaining:.1f}s — PUT PHONE DOWN !!!'
+                        gtxt = f'!!! LOCKING IN {remaining:.1f}s \u2014 PUT PHONE DOWN !!!'
                         gcol = (0, 0, 220)
                     elif any_phone:
                         gtxt = f'PHONE  {consecutive}/{FRAMES_TO_WARN}  ({best_conf:.0%})'
                         gcol = (0, 80, 255)
                     else:
+                        with caps_lock:
+                            ncams = len(caps)
                         n_next = state['offense_count'] + 1
-                        gtxt = (f'WATCHING {len(caps)} cam(s)  |  '
+                        gtxt = (f'WATCHING {ncams} cam(s)  |  '
                                 f'next lockdown #{n_next} = '
                                 f'{fmt_duration(offense_duration(n_next))}')
                         gcol = (0, 160, 60)
                     cv2.putText(sbar, gtxt, (12, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, gcol, 2)
-                    cv2.imshow('LOCK IN — Phone Guard',
+                    cv2.imshow('LOCK IN \u2014 Phone Guard',
                                np.vstack([grid, sbar]))
 
                 key = cv2.waitKey(1) & 0xFF
@@ -647,8 +772,10 @@ def main():
     except KeyboardInterrupt:
         print('\n\n  [*] Stopped by user.')
     finally:
-        for c in caps:
-            c.stop()
+        hotplug.stop()
+        with caps_lock:
+            for c in caps:
+                c.stop()
         cv2.destroyAllWindows()
         print('  [*] Cameras released. Goodbye.\n')
 
