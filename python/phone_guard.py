@@ -93,26 +93,6 @@ def _quiet():
         os.close(old)
 
 
-def _is_real_camera(frame) -> bool:
-    """
-    Return True only if `frame` looks like a real visible-light camera feed.
-
-    Two checks:
-      1. Brightness — frame mean must be > 5.0 (filters pitch-black IR frames).
-      2. Colour — IR/depth cameras map every pixel to equal R=G=B values.
-         A real colour camera always has inter-channel variation even in
-         plain-coloured scenes due to different spectral sensitivities and
-         white-balance processing.  We require the average absolute
-         difference between channels to exceed 2.0 DN.
-    """
-    if frame is None or frame.mean() < 5.0:
-        return False
-    b = frame[:, :, 0].astype(np.float32)
-    g = frame[:, :, 1].astype(np.float32)
-    r = frame[:, :, 2].astype(np.float32)
-    channel_diff = (np.abs(r - g).mean() + np.abs(r - b).mean() + np.abs(g - b).mean()) / 3.0
-    return channel_diff > 2.0
-
 
 # ══════════════════════════════════════════════════════════════
 #  LOCKDOWN STATE  (persists to disk between runs)
@@ -399,31 +379,38 @@ def trigger_lockdown(state: dict):
 #  CAMERA HELPERS
 # ══════════════════════════════════════════════════════════════
 
-def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
+def find_cameras(max_index: int = MAX_SCAN) -> tuple[list[int], set[int]]:
     """
-    Return indices where a camera can actually produce a frame.
+    Scan all indices and return (good, fake).
 
-    Reads one frame per index — virtual/IR devices that respond to
-    isOpened() but cannot stream are excluded here, before any
-    CameraCapture thread is created.  CameraCapture reopens the
-    device cleanly after we release it (proven to work with DSHOW).
+    good — indices that opened AND produced a frame with mean > 5.0.
+    fake — indices that opened but failed that check (IR / depth / virtual
+           devices).  The hot-plug monitor permanently skips fake indices so
+           they can never sneak in after their LEDs warm up.
+
+    Indices that don't open at all are ignored — they may be USB cameras
+    not yet plugged in, so hot-plug must still watch for them.
     """
     print(f'[*] Scanning camera indices 0–{max_index - 1} ...')
-    found = []
+    found: list[int] = []
+    fake:  set[int]  = set()
     for i in range(max_index):
         with _quiet():
             cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret and _is_real_camera(frame):
-                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    cap.release()
-                    found.append(i)
-                    print(f'    [+] Camera {i}  ({w}×{h})')
-                    continue
+            if not cap.isOpened():
+                cap.release()
+                continue
+            ret, frame = cap.read()
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
-    return found
+        if ret and frame is not None and frame.mean() > 5.0:
+            found.append(i)
+            print(f'    [+] Camera {i}  ({w}×{h})')
+        else:
+            fake.add(i)
+            print(f'    [-] Camera {i}  skipped (no usable frame)')
+    return found, fake
 
 
 class CameraCapture(threading.Thread):
@@ -498,11 +485,13 @@ class HotPlugMonitor(threading.Thread):
     from racing over the same DirectShow device when reconnection is slow.
     """
     def __init__(self, caps: list, lock: threading.Lock,
-                 per_cam_consec: dict, interval: float = HOTPLUG_INTERVAL):
+                 per_cam_consec: dict, fake_indices: set[int],
+                 interval: float = HOTPLUG_INTERVAL):
         super().__init__(daemon=True)
         self.caps           = caps
         self.lock           = lock
         self.per_cam_consec = per_cam_consec
+        self.fake_indices   = fake_indices   # never probe these — fake cameras
         self.interval       = interval
         self.running        = True
         self._pending: dict[int, CameraCapture] = {}
@@ -543,20 +532,14 @@ class HotPlugMonitor(threading.Thread):
             self._pending.pop(i).stop()
 
         # ── Probe for genuinely new cameras ───────────────────
-        # Read one frame to confirm the device can actually stream.
-        # Virtual/IR devices pass isOpened() but fail cap.read() — filter
-        # them here so they never generate a CameraCapture thread.
         for i in range(MAX_SCAN):
-            if i in known or i in self._pending:
+            if i in known or i in self._pending or i in self.fake_indices:
                 continue
             with _quiet():
                 cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-                real = False
-                if cap.isOpened():
-                    ret, frame = cap.read()
-                    real = ret and _is_real_camera(frame)
+                opened = cap.isOpened()
                 cap.release()
-            if not real:
+            if not opened:
                 continue
             print(f'\n[+] New camera {i} detected — connecting...')
             cc = CameraCapture(i)
@@ -636,9 +619,10 @@ def main():
 
     # ── Find cameras ──────────────────────────────────────────
     if CAMERA_INDICES == 'auto':
-        indices = find_cameras()
+        indices, fake_indices = find_cameras()
     else:
-        indices = list(CAMERA_INDICES)
+        indices      = list(CAMERA_INDICES)
+        fake_indices = set()
 
     if not indices:
         print('[!] No cameras found. Check connections.')
@@ -708,7 +692,7 @@ def main():
     print('  Watching... Ctrl+C or Q to stop.\n')
 
     # ── Hot-plug monitor ──────────────────────────────────────
-    hotplug = HotPlugMonitor(caps, caps_lock, per_cam_consec)
+    hotplug = HotPlugMonitor(caps, caps_lock, per_cam_consec, fake_indices)
     hotplug.start()
 
     # ── Single persistent preview window ─────────────────────
