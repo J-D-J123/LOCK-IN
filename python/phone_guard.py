@@ -380,22 +380,28 @@ def trigger_lockdown(state: dict):
 
 def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
     """
-    Return indices where a camera device responds.
+    Return indices where a camera can actually produce a frame.
 
-    Uses isOpened() only — no cap.read() — so we never consume a camera
-    handle before CameraCapture opens it.  DSHOW fails instantly on empty
-    indices, keeping the scan fast without obsensor/FFmpeg noise.
+    Reads one frame per index — virtual/IR devices that respond to
+    isOpened() but cannot stream are excluded here, before any
+    CameraCapture thread is created.  CameraCapture reopens the
+    device cleanly after we release it (proven to work with DSHOW).
     """
     print(f'[*] Scanning camera indices 0–{max_index - 1} ...')
     found = []
     for i in range(max_index):
         with _quiet():
             cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-            opened = cap.isOpened()
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    cap.release()
+                    found.append(i)
+                    print(f'    [+] Camera {i}  ({w}×{h})')
+                    continue
             cap.release()
-        if opened:
-            found.append(i)
-            print(f'    [+] Camera {i}  (device present)')
     return found
 
 
@@ -515,16 +521,20 @@ class HotPlugMonitor(threading.Thread):
             self._pending.pop(i).stop()
 
         # ── Probe for genuinely new cameras ───────────────────
-        # isOpened() only — no read — so we don't consume the device handle
-        # before CameraCapture opens it for sustained capture.
+        # Read one frame to confirm the device can actually stream.
+        # Virtual/IR devices pass isOpened() but fail cap.read() — filter
+        # them here so they never generate a CameraCapture thread.
         for i in range(MAX_SCAN):
             if i in known or i in self._pending:
                 continue
             with _quiet():
                 cap = cv2.VideoCapture(i, _SCAN_BACKEND)
-                opened = cap.isOpened()
+                real = False
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    real = ret
                 cap.release()
-            if not opened:
+            if not real:
                 continue
             print(f'\n[+] New camera {i} detected — connecting...')
             cc = CameraCapture(i)
