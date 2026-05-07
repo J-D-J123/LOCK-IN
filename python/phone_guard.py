@@ -639,10 +639,37 @@ def main():
         print('[!] No cameras produced frames. Exiting.')
         sys.exit(1)
 
+    # ── Dedup using live frames (no extra handles opened) ─────
+    # Compare frames from the already-running threads pairwise.
+    # If two feeds are near-identical the higher index is a duplicate.
+    dropped: set[int] = set()
+    samples = {}
     for c in caps:
-        frame = c.get_frame()
-        if frame is not None:
-            h, w = frame.shape[:2]
+        f = c.get_frame()
+        if f is not None:
+            gray = cv2.cvtColor(cv2.resize(f, (64, 48)), cv2.COLOR_BGR2GRAY)
+            samples[c.index] = gray.astype(np.float32)
+
+    for idx_a in sorted(samples):
+        for idx_b in sorted(samples):
+            if idx_b <= idx_a or idx_b in dropped:
+                continue
+            mse = float(np.mean((samples[idx_a] - samples[idx_b]) ** 2))
+            if mse < 8.0:
+                print(f'    [i] Camera {idx_b} is a duplicate of camera {idx_a} '
+                      f'(MSE={mse:.1f}) — stopping.')
+                # Stop the duplicate thread but leave handle held by the winner
+                for c in caps:
+                    if c.index == idx_b:
+                        c.stop()
+                dropped.add(idx_b)
+
+    caps[:] = [c for c in caps if c.index not in dropped]
+
+    for c in caps:
+        f = c.get_frame()
+        if f is not None:
+            h, w = f.shape[:2]
             print(f'    [+] Camera {c.index}  ({w}×{h})')
     per_cam_consec.update({c.index: 0 for c in caps})
     print(f'[+] {len(caps)} camera(s) active.\n')
