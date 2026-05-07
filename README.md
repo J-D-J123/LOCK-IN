@@ -1,74 +1,65 @@
-# LOCK IN — No More Excuses
+# LOCK IN
 
-A three-part accountability system that watches your camera, catches you picking up your phone, and punishes you for it — harder every single time.
+A three-part accountability system that watches your camera, catches you picking up your phone, and punishes you for it harder every single time.
 
----
+Contributions are welcome. If you have ideas for new features, better detection, or platform support beyond Windows, feel free to open a pull request or start a conversation in the issues tab.
 
 ## Screenshots
 
 ### Motivational Website
 ![Motivational website with Three.js galaxy and brutal quotes](screenshots/1-website.png)
 
-### Python Phone Guard — Live Detection
+### Python Phone Guard
 ![Phone guard camera view catching a phone with YOLOv8](screenshots/2-phone-guard.png)
 
-### Lockdown Overlay — Full Screen Block
+### Lockdown Overlay
 ![Fullscreen lockdown overlay blocking the entire computer](screenshots/3-lockdown.png)
 
-### Chrome Extension — Blocked Page
+### Chrome Extension
 ![Extension blocked page shown when visiting a distracting site](screenshots/4-extension-blocked.png)
-
----
 
 ## What It Does
 
-| Component | What it is |
+| Component | Description |
 |---|---|
-| **Motivational Website** | A full-screen Three.js site with brutal quotes, a live "seconds wasted" counter, and a homeless silhouette to show you where comfort leads |
-| **Python Phone Guard** | Runs your webcam through YOLOv8 AI. Detects your phone. Opens a fullscreen lockdown page in Chrome and locks Windows. **Every offence doubles the next lockdown.** |
-| **Chrome Extension** | Browser-native phone detection using TensorFlow.js. Blocks YouTube, Instagram, Reddit, TikTok, Netflix and more the moment a phone is spotted. |
-
----
+| **Motivational Website** | A fullscreen Three.js site with brutal quotes, a live seconds wasted counter, and a visual reminder of where comfort leads |
+| **Python Phone Guard** | Runs your webcam through YOLOv8 AI. Detects your phone. Throws up a fullscreen lockdown overlay that blocks your entire screen. Every offence doubles the next lockdown. |
+| **Chrome Extension** | Browser native phone detection using TensorFlow.js. Blocks YouTube, Instagram, Reddit, TikTok, Netflix and more the moment a phone is spotted. |
 
 ## Folder Structure
 
 ```
-Motivational-LOCK-IN/
+LOCK-IN/
 │
 ├── README.md
 │
-├── web/                        # All HTML/CSS/JS — open directly in any browser
-│   ├── index.html              # Main motivational site (Three.js galaxy + quotes)
-│   ├── detector.html           # Standalone browser phone detector (no extension needed)
-│   └── locked.html             # Fullscreen lockdown page shown by the Python script
+├── web/
+│   ├── index.html              # Motivational site (Three.js galaxy + quotes)
+│   ├── detector.html           # Standalone browser phone detector
+│   └── locked.html             # Fullscreen lockdown page
 │
-├── python/                     # Python phone guard script
-│   ├── phone_guard.py          # Main script — multi-camera, escalating lockdown
+├── python/
+│   ├── phone_guard.py          # Main script (multi-camera, escalating lockdown)
 │   ├── requirements.txt        # pip dependencies
-│   ├── setup_and_run.bat       # First-time setup + launch (Windows)
-│   ├── run.bat                 # Quick launch after first setup
-│   └── lockdown_state.json     # Auto-created — tracks offence count & duration
+│   ├── setup_and_run.bat       # First time setup and launch (Windows)
+│   └── run.bat                 # Quick launch after first setup
 │
-└── extension/                  # Chrome / Edge browser extension
+└── extension/
     ├── manifest.json
     ├── background.js           # Blocks sites, manages lockdown timer
-    ├── detector.html           # Camera detection page (opened via toolbar icon)
+    ├── detector.html           # Camera detection page
     └── blocked.html            # Page shown when a blocked site is visited
 ```
 
----
-
 ## Setup
 
-### 1. Motivational Website
+### Motivational Website
 
-No setup. Double-click `web/index.html` to open in your browser.
+No setup needed. Open `web/index.html` in any browser.
 
----
+### Python Phone Guard
 
-### 2. Python Phone Guard (recommended — most powerful)
-
-**Requirements:** Python 3.10+ with "Add to PATH" checked during install.
+**Requirements:** Python 3.10 or higher with Add to PATH checked during install.
 
 **First time:**
 ```
@@ -82,13 +73,11 @@ double-click  python/run.bat
 ```
 
 **What happens when your phone is spotted:**
-1. Progress bar fills as the AI confirms the detection across frames
-2. A **countdown starts** — put the phone down and the lock cancels
-3. If you hold it past the countdown:
-   - A fullscreen Chrome kiosk page (`web/locked.html`) takes over your screen
-   - Windows locks
-   - The timer counts down — Chrome closes automatically when done
-4. **Every offence doubles the next lockdown** (saved to `lockdown_state.json`)
+1. A progress bar fills as the AI confirms the detection across multiple frames
+2. A countdown starts. Put the phone down and the lock cancels.
+3. Hold it past the countdown and a fullscreen overlay takes over your entire screen
+4. The timer counts down and you cannot close or skip it
+5. Every offence doubles the next lockdown duration
 
 | Offence | Lockdown |
 |---|---|
@@ -99,42 +88,36 @@ double-click  python/run.bat
 | #5 | 80 min |
 | #6+ | 2 hours (max) |
 
-To **reset** your offence count, delete `python/lockdown_state.json`.
+To reset your offence count, delete `python/lockdown_state.json`.
 
-**Key settings** (top of `phone_guard.py`):
+**Key settings** (top of `phone_guard.py`):**
 ```python
-CONFIDENCE_MIN      = 0.55    # how sure the AI must be (lower = more sensitive)
-FRAMES_TO_WARN      = 18      # frames before countdown (~0.6 s at 30 fps)
+CONFIDENCE_MIN      = 0.62    # how sure the AI must be (lower = more sensitive)
+FRAMES_TO_WARN      = 28      # consecutive frames before countdown starts
 COUNTDOWN_SECS      = 4       # seconds to put phone down before lock fires
 BASE_LOCKDOWN_SECS  = 300     # first offence duration (300 = 5 min)
 LOCKDOWN_MULTIPLIER = 2.0     # multiplier per offence (2.0 = doubles)
 MAX_LOCKDOWN_SECS   = 7200    # hard cap (7200 = 2 hours)
 SHOW_WINDOW         = True    # False = fully silent / headless
-CAMERA_INDICES      = 'auto'  # 'auto' or a list like [0, 1, 2]
+CAMERA_INDICES      = 'auto'  # 'auto' scans all cameras, or set a list like [0, 1]
 MODEL               = 'yolov8n.pt'  # swap to yolov8s.pt for better accuracy
 ```
 
----
+### Chrome Extension
 
-### 3. Chrome Extension
-
-**Install (one time):**
-1. Open Chrome or Edge → `chrome://extensions`
-2. Enable **Developer mode** (top-right toggle)
+**Install:**
+1. Open Chrome or Edge and go to `chrome://extensions`
+2. Enable **Developer mode** (top right toggle)
 3. Click **Load unpacked**
 4. Select the `extension/` folder
-5. The **LOCK IN** icon appears in your toolbar
+5. The LOCK IN icon will appear in your toolbar
 
 **Use:**
-- Click the toolbar icon → opens the camera detector tab
-- Allow camera access once, then leave the tab open
+* Click the toolbar icon to open the camera detector tab
+* Allow camera access once and leave the tab open in the background
 
 **Blocked sites during lockdown:**
-YouTube · Instagram · X/Twitter · TikTok · Reddit · Facebook · Netflix · Twitch · Snapchat · Pinterest
-
-**Lockdown durations:** 15 min / 30 min / 1 hr / 2 hr (selectable in the detector tab)
-
----
+YouTube, Instagram, X/Twitter, TikTok, Reddit, Facebook, Netflix, Twitch, Snapchat, Pinterest
 
 ## Tech Stack
 
@@ -144,30 +127,29 @@ YouTube · Instagram · X/Twitter · TikTok · Reddit · Facebook · Netflix · 
 | Phone detection (Python) | [YOLOv8](https://github.com/ultralytics/ultralytics) via Ultralytics |
 | Phone detection (browser) | [TensorFlow.js](https://www.tensorflow.org/js) + COCO-SSD |
 | Camera capture | OpenCV (`cv2`) |
-| Windows lock | `ctypes.windll.user32.LockWorkStation()` |
+| Lockdown overlay | Python `tkinter` fullscreen window |
 | Browser blocking | Chrome MV3 `declarativeNetRequest` |
-| Fonts | Anton · Oswald · Space Mono (Google Fonts) |
-
----
+| Fonts | Anton, Oswald, Space Mono (Google Fonts) |
 
 ## Which Should I Use?
 
 | Situation | Best option |
 |---|---|
-| You want the harshest punishment | **Python script** — locks the whole computer |
-| You want always-on background detection | **Python script** — runs silently with `SHOW_WINDOW = False` |
+| You want the harshest punishment | **Python script** — fullscreen overlay blocks your entire computer |
+| You want always on background detection | **Python script** — runs silently with `SHOW_WINDOW = False` |
 | You only want to block distracting websites | **Chrome Extension** |
-| You don't want to install Python | **Browser detector** (`web/detector.html`) |
-| Multiple monitors / cameras | **Python script** — detects across all cameras simultaneously |
-
----
+| You do not want to install Python | **Browser detector** (`web/detector.html`) |
+| Multiple monitors or cameras | **Python script** — detects across all cameras simultaneously with hot plug support |
 
 ## Tips
 
-- Set `python/run.bat` to run on Windows startup via Task Scheduler for zero-effort enforcement
-- Use `SHOW_WINDOW = False` in `phone_guard.py` to hide the camera window so you forget it's watching
-- The lockdown state persists across reboots — you cannot outrun it by restarting
+* Set `python/run.bat` to run on Windows startup via Task Scheduler for zero effort enforcement
+* Use `SHOW_WINDOW = False` to hide the camera window so you forget it is watching
+* The lockdown state persists across reboots. You cannot outrun it by restarting.
+* Swap `MODEL = 'yolov8s.pt'` if you are getting missed detections in poor lighting
 
----
+## Contributing
 
-*Stop watching. Start doing. The clock doesn't wait for anyone.*
+All contributions are welcome whether that is fixing a bug, improving detection accuracy, adding macOS or Linux support, or anything else you think would make this better. Open an issue to discuss ideas or submit a pull request directly.
+
+*Stop watching. Start doing. The clock does not wait for anyone.*
