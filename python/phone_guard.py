@@ -93,6 +93,27 @@ def _quiet():
         os.close(old)
 
 
+def _is_real_camera(frame) -> bool:
+    """
+    Return True only if `frame` looks like a real visible-light camera feed.
+
+    Two checks:
+      1. Brightness — frame mean must be > 5.0 (filters pitch-black IR frames).
+      2. Colour — IR/depth cameras map every pixel to equal R=G=B values.
+         A real colour camera always has inter-channel variation even in
+         plain-coloured scenes due to different spectral sensitivities and
+         white-balance processing.  We require the average absolute
+         difference between channels to exceed 2.0 DN.
+    """
+    if frame is None or frame.mean() < 5.0:
+        return False
+    b = frame[:, :, 0].astype(np.float32)
+    g = frame[:, :, 1].astype(np.float32)
+    r = frame[:, :, 2].astype(np.float32)
+    channel_diff = (np.abs(r - g).mean() + np.abs(r - b).mean() + np.abs(g - b).mean()) / 3.0
+    return channel_diff > 2.0
+
+
 # ══════════════════════════════════════════════════════════════
 #  LOCKDOWN STATE  (persists to disk between runs)
 # ══════════════════════════════════════════════════════════════
@@ -394,9 +415,7 @@ def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
             cap = cv2.VideoCapture(i, _SCAN_BACKEND)
             if cap.isOpened():
                 ret, frame = cap.read()
-                # Require a non-trivial frame: IR/depth cameras produce
-                # all-black frames (mean ≈ 0) and must be excluded.
-                if ret and frame is not None and frame.mean() > 5.0:
+                if ret and _is_real_camera(frame):
                     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
                     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     cap.release()
@@ -535,7 +554,7 @@ class HotPlugMonitor(threading.Thread):
                 real = False
                 if cap.isOpened():
                     ret, frame = cap.read()
-                    real = ret and frame is not None and frame.mean() > 5.0
+                    real = ret and _is_real_camera(frame)
                 cap.release()
             if not real:
                 continue
