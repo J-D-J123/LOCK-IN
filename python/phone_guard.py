@@ -66,8 +66,11 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-# Use auto-detect for reliable frame capture; _quiet() suppresses scan noise.
-_CAM_BACKEND = 0
+# Two backends:
+#   _SCAN_BACKEND  — DirectShow: instant fail on missing indices, no obsensor noise.
+#   _CAP_BACKEND   — auto (MSMF on Windows): reliable frame delivery for real cameras.
+_SCAN_BACKEND = cv2.CAP_DSHOW if sys.platform == 'win32' else 0
+_CAP_BACKEND  = 0
 
 PHONE_CLASS_ID = 67   # COCO: "cell phone"
 LINE = 64             # terminal line width
@@ -381,7 +384,7 @@ def find_cameras(max_index: int = MAX_SCAN) -> list[int]:
     found = []
     for i in range(max_index):
         with _quiet():
-            cap = cv2.VideoCapture(i, _CAM_BACKEND)
+            cap = cv2.VideoCapture(i, _SCAN_BACKEND)
             if cap.isOpened():
                 ret, _ = cap.read()
                 if ret:
@@ -411,7 +414,7 @@ def deduplicate_cameras(indices: list[int]) -> list[int]:
     samples: dict[int, np.ndarray] = {}
     for i in indices:
         with _quiet():
-            cap = cv2.VideoCapture(i, _CAM_BACKEND)
+            cap = cv2.VideoCapture(i, _SCAN_BACKEND)
             if not cap.isOpened():
                 cap.release()
                 continue
@@ -457,7 +460,7 @@ class CameraCapture(threading.Thread):
     def run(self):
         # Open without _quiet(): that helper redirects fd 2 process-wide and
         # is not safe to call from multiple threads simultaneously.
-        cap = cv2.VideoCapture(self.index, _CAM_BACKEND)
+        cap = cv2.VideoCapture(self.index, _CAP_BACKEND)
         if not cap.isOpened():
             cap.release()
             self.failed = True
@@ -553,7 +556,7 @@ class HotPlugMonitor(threading.Thread):
             if i in known or i in self._pending:
                 continue
             with _quiet():
-                cap = cv2.VideoCapture(i, _CAM_BACKEND)
+                cap = cv2.VideoCapture(i, _SCAN_BACKEND)
                 opened = cap.isOpened()
                 if opened:
                     ret, _ = cap.read()
